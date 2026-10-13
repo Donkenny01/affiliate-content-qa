@@ -31,3 +31,9 @@ A Streamlit application for auditing **publicly reachable buyer-intent articles*
 ## Tests
 
 `python -m pytest -q`
+
+## Pre-publication QA (no passwords)
+
+Choose **Unpublished article — paste HTML** in the Streamlit dashboard. In WordPress, open a draft, switch to **Code editor** from the three-dot menu, copy its content, then paste it into the dashboard. Add your website home URL to resolve relative links. Provide the expected Amazon Associates tag and click **Run QA audit**. Review findings and export the report before publishing. Live link checks are optional; Amazon may block automated status probes.
+
+Only the supplied HTML is checked. WordPress SEO plugin metadata, theme-inserted disclosures, rendered page behavior, and live product availability are not reliably available from a draft HTML paste.

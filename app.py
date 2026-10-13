@@ -2,13 +2,19 @@ import io
 import json
 import pandas as pd
 import streamlit as st
-from qa_engine import audit_article
+from qa_engine import audit_article, audit_html
 
 st.set_page_config(page_title="Affiliate Content QA", page_icon="🔎", layout="wide")
 st.title("Affiliate Content QA")
 st.caption("Audit article links, Amazon tags, ASIN clues, disclosure, and link status. Flags are QA leads, not proof of product availability or link ownership.")
+mode = st.radio("Audit mode", ["Published URLs", "Unpublished article — paste HTML"], horizontal=True)
 with st.form("audit"):
-    urls = st.text_area("Article URLs — one per line", placeholder="https://example.com/best-product/", height=120)
+    if mode == "Published URLs":
+        urls = st.text_area("Article URLs — one per line", placeholder="https://example.com/best-product/", height=120)
+    else:
+        html = st.text_area("Paste WordPress Code Editor HTML", height=300, placeholder="<!-- wp:paragraph -->\n<p>Your draft content and affiliate links...</p>")
+        base_url = st.text_input("Website URL (recommended to resolve relative links)", placeholder="https://example.com/")
+        st.caption("No WordPress credentials required. Copy the draft from WordPress → Code editor. WordPress SEO metadata or theme output may be absent.")
     c1, c2 = st.columns(2)
     with c1:
         tag = st.text_input("Expected Amazon associate tag (optional)", placeholder="mytag-20")
@@ -18,22 +24,31 @@ with st.form("audit"):
     submit = st.form_submit_button("Run QA audit", type="primary")
 
 if submit:
-    targets = list(dict.fromkeys(x.strip() for x in urls.splitlines() if x.strip()))
-    if not targets:
-        st.warning("Enter at least one URL.")
-    elif len(targets) > 30:
-        st.error("Maximum 30 articles per run to avoid overloading servers.")
-    else:
-        results, errors = [], []
-        bar = st.progress(0)
-        for i, url in enumerate(targets):
+    results, errors = [], []
+    if mode == "Unpublished article — paste HTML":
+        if not html.strip():
+            st.warning("Paste the unpublished article HTML first.")
+        else:
             try:
-                results.append(audit_article(url, tag.strip(), check, int(max_check)))
+                results.append(audit_html(html, base_url.strip(), tag.strip(), check, int(max_check)))
             except Exception as exc:
-                errors.append({"article_url": url, "error": str(exc)[:350]})
-            bar.progress((i + 1) / len(targets))
-        st.session_state["audit_results"] = results
-        st.session_state["audit_errors"] = errors
+                errors.append({"article_url": "Unpublished draft", "error": str(exc)[:350]})
+    else:
+        targets = list(dict.fromkeys(x.strip() for x in urls.splitlines() if x.strip()))
+        if not targets:
+            st.warning("Enter at least one URL.")
+        elif len(targets) > 30:
+            st.error("Maximum 30 articles per run to avoid overloading servers.")
+        else:
+            bar = st.progress(0)
+            for i, url in enumerate(targets):
+                try:
+                    results.append(audit_article(url, tag.strip(), check, int(max_check)))
+                except Exception as exc:
+                    errors.append({"article_url": url, "error": str(exc)[:350]})
+                bar.progress((i + 1) / len(targets))
+    st.session_state["audit_results"] = results
+    st.session_state["audit_errors"] = errors
 
 results = st.session_state.get("audit_results", [])
 errors = st.session_state.get("audit_errors", [])

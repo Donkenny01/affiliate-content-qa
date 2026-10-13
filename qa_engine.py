@@ -91,7 +91,6 @@ def section_for(a):
 
 
 def audit_article(article_url: str, expected_tag: str = "", check_status: bool = False, max_link_checks: int = 100):
-    issues = []
     if not allowed_url(article_url):
         raise ValueError("Enter a publicly reachable http(s) article URL.")
     response = request_public(article_url)
@@ -104,6 +103,17 @@ def audit_article(article_url: str, expected_tag: str = "", check_status: bool =
         final_article_url = response.url
     finally:
         response.close()
+    return audit_html(html, final_article_url, expected_tag, check_status, max_link_checks)
+
+
+def audit_html(html: str | bytes, article_url: str = "", expected_tag: str = "", check_status: bool = False, max_link_checks: int = 100):
+    """Audit draft HTML without WordPress authentication. Optional public base URL resolves relative links."""
+    if not html or len(html) > 8_000_000:
+        raise ValueError("Paste nonempty HTML smaller than 8 MB.")
+    if article_url and not (urlparse(article_url).scheme in ("http", "https") and urlparse(article_url).hostname):
+        raise ValueError("Base URL must be an HTTP(S) website address.")
+    final_article_url = article_url or "https://unpublished.invalid/"
+    issues = []
     soup = BeautifulSoup(html, "html.parser")
     main = soup.find("main") or soup.find("article") or soup.body or soup
     document_text = soup.get_text(" ", strip=True)
@@ -112,7 +122,7 @@ def audit_article(article_url: str, expected_tag: str = "", check_status: bool =
     if not soup.find("h1"):
         issues.append(Issue("Warning", "Content", "Missing H1 heading."))
     if not soup.find("meta", attrs={"name": re.compile("^description$", re.I)}):
-        issues.append(Issue("Info", "SEO", "Meta description not detected."))
+        issues.append(Issue("Info", "SEO", "Meta description not detected in supplied HTML (may be managed separately in WordPress)."))
 
     records = []
     page_host = urlparse(final_article_url).hostname or ""
@@ -120,10 +130,13 @@ def audit_article(article_url: str, expected_tag: str = "", check_status: bool =
         href = a.get("href", "").strip()
         if not href:
             continue
+        relative_without_base = not article_url and not urlparse(href).scheme and not href.startswith(("#", "//"))
         url = urldefrag(urljoin(final_article_url, href))[0]
         scheme = urlparse(url).scheme
         if href.startswith("#"):
             kind = "Fragment"
+        elif relative_without_base:
+            kind = "Relative (base URL needed)"
         elif scheme not in ("http", "https"):
             kind = "Other"
         elif AMAZON_HOST.search((urlparse(url).hostname or "").lower()):
@@ -148,7 +161,7 @@ def audit_article(article_url: str, expected_tag: str = "", check_status: bool =
                     issues.append(Issue("Warning", "Amazon ASIN", "ASIN not detectable in the link path. This may be a search/category URL.", loc, url))
             if not rec.anchor.strip() or rec.anchor == "[image/empty anchor]":
                 issues.append(Issue("Warning", "CTA", "Amazon link has no readable anchor text.", loc, url))
-        if scheme in ("http", "https") and not allowed_url(url):
+        if scheme in ("http", "https") and not relative_without_base and not allowed_url(url):
             issues.append(Issue("Warning", "URL safety", "Destination is not a publicly resolvable URL; link status will not be checked.", loc, url))
         # Flag obvious ASIN disagreement where section heading explicitly contains an ASIN
         stated = ASIN_TEXT.search(rec.section)
@@ -192,8 +205,8 @@ def audit_article(article_url: str, expected_tag: str = "", check_status: bool =
             issues.append(Issue("Info", "Coverage", f"Checked at most {max_link_checks} unique destinations; additional links are unverified."))
 
     return {
-        "article_url": article_url,
-        "final_url": final_article_url,
+        "article_url": article_url or "Unpublished HTML draft",
+        "final_url": article_url or "",
         "page_title": soup.title.get_text(" ", strip=True) if soup.title else "",
         "links": [asdict(r) for r in records],
         "issues": [asdict(issue) for issue in issues],
